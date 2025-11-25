@@ -1,0 +1,78 @@
+name: 🚀 SERVER ngancute
+
+on:
+  workflow_dispatch:
+    # ... (Phần chọn thời gian chạy) ...
+    inputs:
+      duration:
+        description: 'Thời gian bên nhau (ngancute)'
+        required: false
+        default: '1_Giờ_30_Phút_(90m)'
+        type: choice
+        options:
+          - '30_Phút_(30m)'
+          - '1_Giờ_(60m)'
+          - '1_Giờ_30_Phút_(90m)'
+          - '2_Giờ_(120m)'
+          - '3_Giờ_(180m)'
+          - '4_Giờ_(240m)'
+          - '6_Giờ_(360m)'
+
+jobs:
+  Ngancute-VPS:
+    runs-on: windows-latest
+    steps:
+      # 1. TẠO USER & PASS
+      - name: 👤 TẠO TÀI KHOẢN NGANCUTE
+        run: |
+          # ... (Tạo user 'ngancute' và mật khẩu ngẫu nhiên an toàn) ...
+          $pw = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 12 | % {[char]$_})
+          $securePass = ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name "ngancute" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "ngancute"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "ngancute"
+          echo "RDP_PASS=$pw" >> $env:GITHUB_ENV
+
+      # 2. CÀI ĐẶT VÀ KHỞI TẠO NGROK
+      - name: 🌐 TẠO ĐỊA CHỈ IP (NGROK)
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          if (-not $env:NGROK_AUTH_TOKEN) { Write-Error "❌ Chưa nhập NGROK_AUTH_TOKEN vào Secrets!"; exit 1 }
+          # Tải, giải nén và xác thực Ngrok bằng Secret Key
+          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+          Expand-Archive ngrok.zip
+          .\ngrok\ngrok.exe config add-authtoken $env:NGROK_AUTH_TOKEN
+          # Chạy Tunnel TCP kết nối với cổng RDP (3389)
+          Start-Process -FilePath ".\ngrok\ngrok.exe" -ArgumentList "tcp 3389"
+          Start-Sleep -Seconds 5
+          # Lấy địa chỉ công khai và lưu vào biến SERVER_IP
+          $tunnel = Invoke-RestMethod http://localhost:4040/api/tunnels
+          $publicUrl = $tunnel.tunnels[0].public_url
+          $address = $publicUrl -replace "tcp://", ""
+          echo "SERVER_IP=$address" >> $env:GITHUB_ENV
+
+      # 3. KÍCH HOẠT RDP & HIỂN THỊ KẾT NỐI
+      - name: 🎉 THÔNG TIN KẾT NỐI
+        run: |
+          # Mở cổng RDP trên Firewall
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          
+          # Hiển thị thông tin
+          Write-Host "🔗 IP Address:  $env:SERVER_IP"
+          Write-Host "👤 Username:    ngancute"
+          Write-Host "🔐 Password:    $env:RDP_PASS"
+
+      # 4. TREO MÁY (KEEP ALIVE)
+      - name: ⏳ DUY TRÌ SERVER
+        run: |
+          $seconds = [int]$env:MINUTES * 60
+          # ... (Loop đếm ngược để giữ Runner không bị ngắt kết nối) ...
+          $end = (Get-Date).AddSeconds($seconds)
+          while ((Get-Date) -lt $end) {
+              $remaining = New-TimeSpan -Start (Get-Date) -End $end
+              Write-Host "`r💓 Ngancute còn sống: $($remaining.Hours):$($remaining.Minutes):$($remaining.Seconds) " -NoNewline
+              Start-Sleep -Seconds 5
+          }
+          
